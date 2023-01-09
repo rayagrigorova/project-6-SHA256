@@ -9,6 +9,8 @@ const int UNSIGNED_INT_BITS = 32;
 const int UNSIGNED_CHAR_BITS = 8;
 const int BIG_ENDIAN_INT_BITS = 64;
 const int BIG_ENDIAN_INT_BYTES = 8;
+const int FINAL_HASH_BITS = 256;
+const int FINAL_HASH_LENGTH = 64;
 
 unsigned int h0 = 0x6a09e667;
 unsigned int h1 = 0xbb67ae85;
@@ -37,12 +39,14 @@ void addNewMessage(unsigned char** messages, int& size, int& messagesCount, cons
 void increaseArraySize(unsigned char** messages, int& size, const int messagesCount);
 int messageLength(unsigned char* message);
 
-unsigned char* createHash(unsigned char* message);
+void createHash(unsigned char* message, unsigned char result[]);
 unsigned char* preProcessing(unsigned char* message);
 void chunkLoop(unsigned char* paddedMessage, const int numberOf8BitWordsInDigest);
 unsigned int rightRotate(const unsigned int n, const unsigned int d);
 unsigned int leftRotate(const unsigned int n, const unsigned int d);
 unsigned int reverseBits(unsigned int num);
+void initHash(unsigned int* finalHash);
+void toHex(unsigned int* finalHash, unsigned char result[]);
 
 void printBinaryNumber(unsigned int a);
 
@@ -55,7 +59,9 @@ int main()
     addNewMessage(messages, size, messagesCount, "message1.txt");
     std::cout << messages[0] << "\n";
 
-    unsigned char* hashMessage = createHash(messages[0]);
+    unsigned char hashMessage1[FINAL_HASH_LENGTH + 1];
+    createHash(messages[0], hashMessage1);
+    std::cout << hashMessage1;
 
     freeSpace(messages, messagesCount);
 }
@@ -147,14 +153,8 @@ int messageLength(unsigned char* message) {
     return i;
 }
 
-unsigned char* createHash(unsigned char* message) {
+void createHash(unsigned char* message, unsigned char result[]) {
     unsigned char* paddedMessage = preProcessing(message);
-
-    //for (int i = 0; i < 64; i++) {
-    //    std::cout << "i = " << i << "\n";
-    //    printBinaryNumber(paddedMessage[i]);
-    //    std::cout << "\n";
-    //}
 
     //Now, process the message in 512-bit chunks 
     //So, in each step, process 64 characters from the paddedMessage array
@@ -162,9 +162,14 @@ unsigned char* createHash(unsigned char* message) {
     for (int i = 0; paddedMessage[i] != UCHAR_MAX; i += numberOf8BitWordsInDigest) {
         chunkLoop(paddedMessage + i * numberOf8BitWordsInDigest, numberOf8BitWordsInDigest);
     }
+    //Now, create the final hash by appending h0,...,h7
+    unsigned int* finalHash = new unsigned int[FINAL_HASH_BITS / UNSIGNED_INT_BITS];
+    initHash(finalHash);
+    toHex(finalHash, result);
+    result[FINAL_HASH_LENGTH] = '\0';
 
+    delete[] finalHash;
     delete[] paddedMessage;
-    return nullptr;
 }
 
 unsigned char* preProcessing(unsigned char* message) {
@@ -230,21 +235,11 @@ void chunkLoop(unsigned char* paddedMessage, const int numberOf8BitWordsInDigest
 
         //Now, extract the bits of each character into w[wInd]
         for (int j = 0; j < _8BitWordsIn32BitWord; j++) {
-            ////Copy the current 8-bit char to the unsigned int 
-            //w[wInd] = w[wInd] | paddedMessage[i + j];
-            ////Rotate the integer so the 8 bits come in place
-            //w[wInd] = rightRotate(w[wInd], UNSIGNED_CHAR_BITS);
-
-            //Turn the 8-bit word into a 32-bit unsigned int and 
-            //leffshift it as much as needed 
             unsigned int _8BitWordUnsignedInt = paddedMessage[i + j];
             _8BitWordUnsignedInt <<= ((_8BitWordsIn32BitWord - j - 1) * UNSIGNED_CHAR_BITS);
             w[wInd] = w[wInd] | _8BitWordUnsignedInt;
 
         }
-        //std::cout << "w[wind] = " << w[wInd] << "\n";
-        //std::cout << "wind = " << wInd << "\n";
-        //std::cout << "\n";
 
         wInd++;
     }
@@ -256,12 +251,6 @@ void chunkLoop(unsigned char* paddedMessage, const int numberOf8BitWordsInDigest
         w[i] = w[i - 16] + s0 + w[i - 7] + s1;
 
     }
-    //for (int i = 0; i < 64; i++) {
-    //    printBinaryNumber(w[i]);
-    //    std::cout << ' ';
-    //    if (i % 2) std::cout << '\n';
-    //}
-    // 
     
     //Initialize working variables to current hash value:
     unsigned int a = h0;
@@ -291,19 +280,16 @@ void chunkLoop(unsigned char* paddedMessage, const int numberOf8BitWordsInDigest
         b = a;
         a = temp1 + temp2;
     }
-    //Modify hash values by adding their respective variables to them 
-    long long mod = UINT32_MAX;
-    mod += 1;
 
-    //TODO: test for arithmetic overflow 
-    h0 = (h0 + a) % mod;
-    h1 = (h1 + b) % mod;
-    h2 = (h2 + c) % mod;
-    h3 = (h3 + d) % mod;
-    h4 = (h4 + e) % mod;
-    h5 = (h5 + f) % mod;
-    h6 = (h6 + g) % mod;
-    h7 = (h7 + h) % mod;
+    //All addition is modulo 2^32 
+    h0 = h0 + a;
+    h1 = h1 + b;
+    h2 = h2 + c;
+    h3 = h3 + d;
+    h4 = h4 + e;
+    h5 = h5 + f;
+    h6 = h6 + g;
+    h7 = h7 + h;
 
     delete[] w;
 }
@@ -345,3 +331,40 @@ unsigned int reverseBits(unsigned int num)
     }
     return reversed;
 }
+
+void initHash(unsigned int* finalHash) {
+    finalHash[0] = h0;
+    finalHash[1] = h1;
+    finalHash[2] = h2;
+    finalHash[3] = h3;
+    finalHash[4] = h4;
+    finalHash[5] = h5;
+    finalHash[6] = h6;
+    finalHash[7] = h7;
+}
+
+void toHex(unsigned int* finalHash, unsigned char result[])
+{
+    const int HEX_DIGIT_BITS = 4;
+    int numberOfIntsInFinalHash = FINAL_HASH_BITS / UNSIGNED_INT_BITS; // 8
+    int hexValuesInUnsignedInt = UNSIGNED_INT_BITS / HEX_DIGIT_BITS; //8
+    int resultInd = -1;
+
+    //For each int
+    for (int i = 0; i < numberOfIntsInFinalHash; i++) {
+        resultInd = i * hexValuesInUnsignedInt + hexValuesInUnsignedInt - 1;
+        for (int j = 0; j < hexValuesInUnsignedInt; j++) {
+            int temp = finalHash[i] % 16;
+            char ch;
+            if (temp < 10) {
+                ch = '0' + temp;
+            }
+            else {
+                ch = 'A' + temp - 10;
+            }
+            finalHash[i] /= 16;
+            result[resultInd--] = ch;
+        }
+    }
+}
+
