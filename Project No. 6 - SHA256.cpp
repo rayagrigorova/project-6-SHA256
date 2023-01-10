@@ -12,6 +12,11 @@ const int BIG_ENDIAN_INT_BYTES = 8;
 const int FINAL_HASH_BITS = 256;
 const int FINAL_HASH_LENGTH = 64;
 
+int size = START_SIZE_MESSAGES;
+int messagesCount = 0;
+unsigned char** messages = new unsigned char* [START_SIZE_MESSAGES];
+unsigned char** hashMessages = new unsigned char* [START_SIZE_MESSAGES];
+
 unsigned int h0 = 0x6a09e667;
 unsigned int h1 = 0xbb67ae85;
 unsigned int h2 = 0x3c6ef372;
@@ -32,12 +37,17 @@ unsigned int k[64] = {
 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 };
 
+int inputValidation(const char buff[], const char validInputs[]);
+bool stringsAreEqual(const char* str1, const char* str2);
+
+void readMessageFromFile();
 unsigned char* createMessageFromFile(const char* fileName);
 int countCharactersInFile(const char* fileName);
-void freeSpace(unsigned char** messages, const int numberOfMessages);
-void addNewMessage(unsigned char** messages, int& size, int& messagesCount, const char* fileName);
-void increaseArraySize(unsigned char** messages, int& size, const int messagesCount);
+void freeSpace(unsigned char** arr, const int size);
+void addNewMessage(const char* fileName);
+void increaseArraySize();
 int messageLength(unsigned char* message);
+bool messageAlreadyExists(unsigned char* message);
 
 void createHash(unsigned char* message, unsigned char result[]);
 unsigned char* preProcessing(unsigned char* message);
@@ -53,17 +63,84 @@ void printBinaryNumber(unsigned int a);
 
 int main()
 {
-    int size = START_SIZE_MESSAGES;
-    int messagesCount = 0;
-    unsigned char** messages = new unsigned char* [START_SIZE_MESSAGES];
-    addNewMessage(messages, size, messagesCount, "message1.txt");
-    std::cout << messages[0] << "\n";
+    char buff[100];
+    char validInputs[] = {'0', '1', '2', '3'};
+    bool getUserInput = true;
+    while (getUserInput) {
+        std::cout << "To exit the program, enter 0\n";
+        std::cout << "To read a message from file, enter 1\n";
+        std::cout << "To hash a message, enter 2\n";
+        std::cout << "To read a hashed message, enter 3\n";
+        std::cin.getline(buff, 100);
+        int operation = inputValidation(buff, validInputs);
+        switch (operation) {
+        case 0: getUserInput = false; break;
+        case 1: readMessageFromFile(); break;
+        case 2: hashMessage(); break;
+        default: std::cout << "Invalid user input";
+        }
+    }
 
-    unsigned char hashMessage1[FINAL_HASH_LENGTH + 1];
-    createHash(messages[0], hashMessage1);
-    std::cout << hashMessage1;
+    //unsigned char** messages = new unsigned char* [START_SIZE_MESSAGES];
+    //addNewMessage(messages, size, messagesCount, "message1.txt");
+    //std::cout << messages[0] << "\n";
+
+    //unsigned char** hashMessages = new unsigned char* [START_SIZE_MESSAGES];
+    //createHash(messages[0], hashMessages[messagesCount - 1]);
+    //std::cout << hashMessages[0];
 
     freeSpace(messages, messagesCount);
+    freeSpace(hashMessages, messagesCount);
+}
+
+//This function will return the number of the operation to be performed or -1
+int inputValidation(const char buff[], const char validInputs[]) {
+    //Compare each of the valid inputs to buff
+    for (int i = 0; validInputs[i] != '\0'; i++) {
+        if (stringsAreEqual(buff, &validInputs[i])) {
+            return validInputs[i];
+        }
+    }
+    return -1;
+}
+
+bool stringsAreEqual(const char* str1, const char* str2)
+{
+    while (*str1 && *str2) {
+        if (*str1 != *str2) {
+            return 0;
+        }
+    }
+    //If one of the strings is longer than the other, they can't be equal
+    //This will only return true if *str1 == *str2 == '\0'
+    return (*str1 == *str2);
+}
+
+void readMessageFromFile() {
+    char buff[100];
+    char fileName[100];
+    std::cout << "Enter a valid file name:\n";
+    std::cin.getline(fileName, 100);
+
+    std::ifstream file(fileName);
+    if (!file) {
+        std::cout << "Error reading from file\n";
+        return;
+    }
+    std::cout << "Data from " << fileName << ":\n";
+    while (file >> buff) {
+        std::cout << buff;
+    }
+    char validInput[] = { '0', '1' };
+    std::cout << "Do you want to save this message? Enter 1 if yes and 0 if no";
+    std::cin.getline(buff, 100);
+    switch (inputValidation(buff, validInput)) {
+    case 0: return;
+    case 1: createMessageFromFile(fileName); break;
+    defualt: std::cout << "Invalid user input\n";
+    }
+
+    file.close();
 }
 
 //This function will create a char array and return a pointer to it
@@ -83,7 +160,10 @@ unsigned char* createMessageFromFile(const char* fileName) {
         i++;
     }
     message[arrayLength] = '\0';
+    std::cout << "Message was created.\n";
     file.close();
+
+    addNewMessage(fileName);
     return message;
 }
 
@@ -100,30 +180,30 @@ int countCharactersInFile(const char* fileName) {
         ctr++;
     }
     file.close();
-    //std::cout << "Number of characters: " << ctr << "\n";
     return ctr;
 }
 
-void freeSpace(unsigned char** messages, const int numberOfMessages) {
-    for (int i = 0; i < numberOfMessages; i++) {
-        delete[] messages[i];
-        messages[i] = nullptr;
+void freeSpace(unsigned char** arr, const int size) {
+    for (int i = 0; i < size; i++) {
+        delete[] arr[i];
+        arr[i] = nullptr;
     }
-    delete[] messages;
-    messages = nullptr;
+    delete[] arr;
+    arr = nullptr;
 }
 
-void addNewMessage(unsigned char** messages, int& size, int& messagesCount, const char* fileName) {
+void addNewMessage(const char* fileName) {
     //Before adding a new message, we should first make sure that there is enough space in the messages array.
     //If not, then we must increase the size of the array by START_SIZE_MESSAGES
     if (messagesCount >= size) {
-        increaseArraySize(messages, size, messagesCount);
+        increaseArraySize();
     }
     //Now, we can freely add the new message to the array
     messages[messagesCount++] = createMessageFromFile(fileName);
+    std::cout << "Message was added to the array of messages under number " << messagesCount << "\n";
 }
 
-void increaseArraySize(unsigned char** messages, int& size, const int messagesCount) {
+void increaseArraySize() {
     //There is no use of deleting the already existing messages. 
     //We can simply create a new, bigger array of pointers to the messages
     unsigned char** newMessagesArray = new unsigned char* [size + START_SIZE_MESSAGES];
@@ -151,6 +231,16 @@ int messageLength(unsigned char* message) {
         i++;
     }
     return i;
+}
+
+bool messageAlreadyExists(unsigned char* message)
+{
+    for (int i = 0; i < messagesCount; i++) {
+        if (stringsAreEqual(message, messages[i])) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void createHash(unsigned char* message, unsigned char result[]) {
