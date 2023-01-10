@@ -2,20 +2,28 @@
 #include <fstream>
 #include <climits>
 
-const int START_SIZE_MESSAGES = 100;
+const int START_SIZE = 100;
+
 const int DIGEST_SIZE = 512;
+
 const int BITS_IN_A_BYTE = 8;
 const int UNSIGNED_INT_BITS = 32;
 const int UNSIGNED_CHAR_BITS = 8;
+
 const int BIG_ENDIAN_INT_BITS = 64;
 const int BIG_ENDIAN_INT_BYTES = 8;
-const int FINAL_HASH_BITS = 256;
-const int FINAL_HASH_LENGTH = 64;
 
-int size = START_SIZE_MESSAGES;
+const int HASH_BITS = 256;
+const int HASH_CHARACTERS = 64; 
+
+int messagesSize = START_SIZE;
 int messagesCount = 0;
-unsigned char** messages = new unsigned char* [START_SIZE_MESSAGES];
-unsigned char** hashMessages = new unsigned char* [START_SIZE_MESSAGES];
+
+int hashesSize = START_SIZE;
+int hashesCount = 0;
+
+char** messages = new char* [START_SIZE];
+char** hashMessages = new char* [START_SIZE];
 
 unsigned int h0 = 0x6a09e667;
 unsigned int h1 = 0xbb67ae85;
@@ -41,22 +49,29 @@ int inputValidation(const char buff[], const char validInputs[]);
 bool stringsAreEqual(const char* str1, const char* str2);
 
 void readMessageFromFile();
-unsigned char* createMessageFromFile(const char* fileName);
+char* createMessageFromFile(const char* fileName);
 int countCharactersInFile(const char* fileName);
-void freeSpace(unsigned char** arr, const int size);
-void addNewMessage(const char* fileName);
-void increaseArraySize();
-int messageLength(unsigned char* message);
-bool messageAlreadyExists(unsigned char* message);
+void freeSpace(char** arr, const int size);
+void addStringToArray(char* str, int& stringsCount, int& arraySize, char** arr);
+void increaseArraySize(char** arr, int& arraySize);
+int stringLength(char* str);
 
-void createHash(unsigned char* message, unsigned char result[]);
-unsigned char* preProcessing(unsigned char* message);
-void chunkLoop(unsigned char* paddedMessage, const int numberOf8BitWordsInDigest);
+bool arrayContainsString(char* str, char** array);
+
+void hashMessage();
+char* createHash(char* message);
+void saveHashToFile(char* hash, char* fileName);
+bool fileExists(char* fileName);
+char* preProcessing(char* message);
+void chunkLoop(char* paddedMessage, const int numberOf8BitWordsInDigest);
 unsigned int rightRotate(const unsigned int n, const unsigned int d);
 unsigned int leftRotate(const unsigned int n, const unsigned int d);
 unsigned int reverseBits(unsigned int num);
 void initHash(unsigned int* finalHash);
-void toHex(unsigned int* finalHash, unsigned char result[]);
+void toHex(unsigned int* finalHash, char result[]);
+int stringLengthUnsigned(char* str);
+
+void readHashedMessage();
 
 void printBinaryNumber(unsigned int a);
 
@@ -66,6 +81,7 @@ int main()
     char buff[100];
     char validInputs[] = {'0', '1', '2', '3'};
     bool getUserInput = true;
+
     while (getUserInput) {
         std::cout << "To exit the program, enter 0\n";
         std::cout << "To read a message from file, enter 1\n";
@@ -77,17 +93,10 @@ int main()
         case 0: getUserInput = false; break;
         case 1: readMessageFromFile(); break;
         case 2: hashMessage(); break;
+        case 3: readHashedMessage(); break;
         default: std::cout << "Invalid user input";
         }
     }
-
-    //unsigned char** messages = new unsigned char* [START_SIZE_MESSAGES];
-    //addNewMessage(messages, size, messagesCount, "message1.txt");
-    //std::cout << messages[0] << "\n";
-
-    //unsigned char** hashMessages = new unsigned char* [START_SIZE_MESSAGES];
-    //createHash(messages[0], hashMessages[messagesCount - 1]);
-    //std::cout << hashMessages[0];
 
     freeSpace(messages, messagesCount);
     freeSpace(hashMessages, messagesCount);
@@ -106,6 +115,9 @@ int inputValidation(const char buff[], const char validInputs[]) {
 
 bool stringsAreEqual(const char* str1, const char* str2)
 {
+    if (str1 == nullptr || str2 == nullptr) {
+        return false;
+    }
     while (*str1 && *str2) {
         if (*str1 != *str2) {
             return 0;
@@ -144,26 +156,32 @@ void readMessageFromFile() {
 }
 
 //This function will create a char array and return a pointer to it
-unsigned char* createMessageFromFile(const char* fileName) {
+char* createMessageFromFile(const char* fileName) {
     int arrayLength = countCharactersInFile(fileName);
-    unsigned char* message = new unsigned char[arrayLength + 1];
+    char* message = new char[arrayLength + 1];
 
     std::ifstream file(fileName);
     if (!file) {
         std::cout << "Error reading from file";
         return nullptr;
     }
-    unsigned char ch;
+    char ch;
     int i = 0;
     while (file >> std::noskipws >> ch) {
         message[i] = ch;
         i++;
     }
     message[arrayLength] = '\0';
+
+    if (arrayContainsString(message, messages)) {
+        std::cout << "The message already exists\n";
+        return nullptr;
+    }
+
     std::cout << "Message was created.\n";
     file.close();
 
-    addNewMessage(fileName);
+    addStringToArray(message, messagesCount, messagesSize, messages);
     return message;
 }
 
@@ -174,7 +192,7 @@ int countCharactersInFile(const char* fileName) {
         return -1;
     }
 
-    unsigned char ch;
+    char ch;
     int ctr = 0;
     while (file >> std::noskipws >> ch) {
         ctr++;
@@ -183,7 +201,7 @@ int countCharactersInFile(const char* fileName) {
     return ctr;
 }
 
-void freeSpace(unsigned char** arr, const int size) {
+void freeSpace(char** arr, const int size) {
     for (int i = 0; i < size; i++) {
         delete[] arr[i];
         arr[i] = nullptr;
@@ -192,84 +210,196 @@ void freeSpace(unsigned char** arr, const int size) {
     arr = nullptr;
 }
 
-void addNewMessage(const char* fileName) {
+void addStringToArray(char* str, int& stringsCount, int& arraySize, char** arr) {
     //Before adding a new message, we should first make sure that there is enough space in the messages array.
     //If not, then we must increase the size of the array by START_SIZE_MESSAGES
-    if (messagesCount >= size) {
-        increaseArraySize();
+    if (messagesCount >= arraySize) {
+        increaseArraySize(arr, arraySize);
     }
     //Now, we can freely add the new message to the array
-    messages[messagesCount++] = createMessageFromFile(fileName);
-    std::cout << "Message was added to the array of messages under number " << messagesCount << "\n";
+    arr[stringsCount++] = str;
+    std::cout << "Added to the array under index " << stringsCount - 1 << "\n";
 }
 
-void increaseArraySize() {
-    //There is no use of deleting the already existing messages. 
-    //We can simply create a new, bigger array of pointers to the messages
-    unsigned char** newMessagesArray = new unsigned char* [size + START_SIZE_MESSAGES];
+void increaseArraySize(char** arr, int& arraySize) {
+    //There is no use of deleting the already existing strings. 
+    //We can simply create a new, bigger array of pointers to them
+    char** newArray = new char* [arraySize + START_SIZE];
 
     //Point to the already existing strings 
     for (int i = 0; i < messagesCount; i++) {
-        newMessagesArray[i] = messages[i];
+        newArray[i] = arr[i];
     }
 
     //Delete the old array of pointers pointing to the strings
-    delete[] messages;
+    delete[] arr;
 
     //When deleting the contents of messages, we aren't actually deleting the pointer called 'messages'
     //We want to point it to the new array
-    messages = newMessagesArray;
+    arr = newArray;
 
     //Update the size 
-    size += START_SIZE_MESSAGES;
+    arraySize += START_SIZE;
 }
 
-int messageLength(unsigned char* message) {
+int stringLength(char* str) {
     int i = 0;
-    while (*message) {
-        message++;
+    while (*str) {
+        str++;
         i++;
     }
     return i;
 }
 
-bool messageAlreadyExists(unsigned char* message)
+
+bool arrayContainsString(char* str, char** array)
 {
     for (int i = 0; i < messagesCount; i++) {
-        if (stringsAreEqual(message, messages[i])) {
+        if (stringsAreEqual(str, array[i])) {
             return true;
         }
     }
     return false;
 }
 
-void createHash(unsigned char* message, unsigned char result[]) {
-    unsigned char* paddedMessage = preProcessing(message);
+void hashMessage()
+{
+    char* hash = nullptr;
+
+    std::cout << "Enter 0 if you want to hash an already existing message\n";
+    std::cout << "Enter 1 if you want to type the message\n";
+
+    char buff[100];
+    char validInputs[] = { '0', '1'};
+    std::cin.getline(buff, 100);
+    switch (inputValidation(buff, validInputs)) {
+    case 0: 
+        int ind;
+        std::cout << "Enter the index of the message you want to hash.\n";
+        std::cin >> ind;
+        if (ind < 0 || ind >= messagesCount) {
+            std::cout << "Invalid input\n";
+            return;
+        }
+        hash = createHash(messages[ind]);
+        break;
+    case 1: 
+        std::cout << "Enter a message:\n";
+        std::cin.getline(buff, 100);
+        hash = createHash(buff);
+        break;
+    default: std::cout << "Invalid input\n";
+    }
+
+    std::cout << "Hash: " << hash << "\n";
+    std::cout << "Do you want to save this hash ? Enter 1 if yes and 0 if no\n";
+    std::cin.getline(buff, 100);
+    switch (inputValidation(buff, validInputs)) {
+    case 0: return;
+    case 1: addStringToArray(hash, hashesCount, hashesSize, hashMessages); break;
+    default: std::cout << "Invalid input\n";
+    }
+
+    std::cout << "Do you want to save this hash in a file? Enter 1 if yes and 0 if no\n";
+    std::cin.getline(buff, 100);
+    switch (inputValidation(buff, validInputs)) {
+    case 0: return;
+    case 1: 
+        std::cout << "Enter file name:";
+        std::cin.getline(buff, 100);
+        saveHashToFile(hash, buff);
+        break;
+    default: std::cout << "Invalid input\n";
+    }
+}
+
+char* createHash(char* message) {
+    char* result = new char[HASH_CHARACTERS + 1];
+     char* paddedMessage = preProcessing(message);
 
     //Now, process the message in 512-bit chunks 
     //So, in each step, process 64 characters from the paddedMessage array
     int numberOf8BitWordsInDigest = DIGEST_SIZE / BITS_IN_A_BYTE; //64
-    for (int i = 0; paddedMessage[i] != UCHAR_MAX; i += numberOf8BitWordsInDigest) {
+    for (int i = 0; paddedMessage[i] != 0b11111111; i += numberOf8BitWordsInDigest) {
         chunkLoop(paddedMessage + i * numberOf8BitWordsInDigest, numberOf8BitWordsInDigest);
     }
     //Now, create the final hash by appending h0,...,h7
-    unsigned int* finalHash = new unsigned int[FINAL_HASH_BITS / UNSIGNED_INT_BITS];
+    unsigned int* finalHash = new unsigned int[HASH_BITS / UNSIGNED_INT_BITS];
     initHash(finalHash);
     toHex(finalHash, result);
-    result[FINAL_HASH_LENGTH] = '\0';
+    result[HASH_CHARACTERS] = '\0';
 
     delete[] finalHash;
     delete[] paddedMessage;
+
+    return result;
 }
 
-unsigned char* preProcessing(unsigned char* message) {
+void saveHashToFile(char* hash, char* fileName)
+{
+    if (fileExists(fileName)) {
+        char validInputs[] = { '0', '1', '2' };
+        char buff[100];
+        std::cout << "This file already exists\n";
+        std::cout << "(0) cancel\n";
+        std::cout << "(1) add to file\n";
+        std::cout << "(2) overwrite file\n";
+        std::cin.getline(buff, 100);
+        switch (inputValidation(buff, validInputs)) {
+        case 0: return;
+        case 1: {
+            std::ofstream file;
+            file.open(fileName, std::ios::app);
+            if (!file) {
+                std::cout << "Error reading from file\n";
+                return;
+            }
+            file << hash;
+            file.close();
+            break;
+        }
+        case 2: {
+            std::ofstream file;
+            file.open(fileName, std::ios::trunc);
+            if (!file) {
+                std::cout << "Error reading from file\n";
+                return;
+            }
+            file << hash;
+            file.close();
+            break;
+        }
+                
+        }
+
+    }
+
+    else {
+        std::ofstream file(fileName);
+        if (!file) {
+            std::cout << "Error reading from file\n";
+            return;
+        }
+        file << hash;
+
+    }
+    std::cout << "Hash was added to file\n";
+}
+
+bool fileExists(char* fileName)
+{
+    std::ifstream f(fileName);
+    return f.good();
+}
+
+char* preProcessing(char* message) {
     //begin with the original message of length L bits
     //append a single '1' bit
     //append K '0' bits, where K is the minimum number >= 0 such that L + 1 + K + 64 is a multiple of 512
     //append L as a 64 - bit big - endian integer, making the total post - processed length a multiple of 512 bits
     const int SINGLE_BIT_SIZE = 1;
 
-    int length = messageLength(message);
+    int length = stringLengthUnsigned(message);
     int L = BITS_IN_A_BYTE * length;
     int rem = (L + BITS_IN_A_BYTE + BIG_ENDIAN_INT_BITS) % DIGEST_SIZE;
     //This is the number of 0 bits, but it makes more sense to think of them as bytes.
@@ -278,7 +408,7 @@ unsigned char* preProcessing(unsigned char* message) {
     //The size of the padded message will be equal to the original length of the message + 1 byte for the appended
     //'1' and the zeroes after it + K / BITS_IN_A_BYTE + 8 bytes for the big-endian int + 1 for the null-terminator 
     int paddedMessageLength = length + 1 + K / BITS_IN_A_BYTE + BIG_ENDIAN_INT_BYTES + 1;
-    unsigned char* paddedMessage = new unsigned char[paddedMessageLength];
+    char* paddedMessage = new char[paddedMessageLength];
     
     //Copy the message to the paddedMessage array 
     for (int i = 0; i < length; i++) {
@@ -294,22 +424,22 @@ unsigned char* preProcessing(unsigned char* message) {
         paddedMessage[i] = 0b00000000;
     }
 
-    unsigned char mask = 0xFF; //11111111
+    char mask = 0b11111111;
     for (int i = paddedMessageLength - 2; i >= endInd; i--) {
         //Read the last 8 bits of originalInputLengthInBinary
-        unsigned char ch = L & mask;
+        char ch = L & mask;
         paddedMessage[i] = ch;
         //Rightshift originalInputLengthInBinary by 8 bits 
         L = L >> BITS_IN_A_BYTE;
     }
-    //Since the padding has been done using a char with value zero, I will use the biggest possible unsigned char 
+    //Since the padding has been done using a char with value zero, I will use the biggest possible char 
     //instead of a null terminator 
-    paddedMessage[paddedMessageLength - 1] = UCHAR_MAX;
+    paddedMessage[paddedMessageLength - 1] = 0b11111111;
 
     return paddedMessage;
 }
 
-void chunkLoop(unsigned char* paddedMessage, const int numberOf8BitWordsInDigest) {
+void chunkLoop(char* paddedMessage, const int numberOf8BitWordsInDigest) {
     int _8BitWordsIn32BitWord = UNSIGNED_INT_BITS / UNSIGNED_CHAR_BITS;
     const int MESSAGE_SCHEDULE_SIZE = 64;
     const int INPUT_DATA_SIZE = 16; 
@@ -433,10 +563,10 @@ void initHash(unsigned int* finalHash) {
     finalHash[7] = h7;
 }
 
-void toHex(unsigned int* finalHash, unsigned char result[])
+void toHex(unsigned int* finalHash, char result[])
 {
     const int HEX_DIGIT_BITS = 4;
-    int numberOfIntsInFinalHash = FINAL_HASH_BITS / UNSIGNED_INT_BITS; // 8
+    int numberOfIntsInFinalHash = HASH_BITS / UNSIGNED_INT_BITS; // 8
     int hexValuesInUnsignedInt = UNSIGNED_INT_BITS / HEX_DIGIT_BITS; //8
     int resultInd = -1;
 
@@ -456,5 +586,46 @@ void toHex(unsigned int* finalHash, unsigned char result[])
             result[resultInd--] = ch;
         }
     }
+}
+
+void readHashedMessage()
+{
+    //SHA256 is irreversible. So the only way to find the original message is to 
+    //hash all existing messages and compare them to the hash 
+    std::cout << "Enter 0 if you want to read an already existing hash\n";
+    std::cout << "Enter 1 if you want to type the hash\n";
+
+    char* hash;
+    char buff[100];
+    char validInputs[] = { '0', '1' };
+    std::cin.getline(buff, 100);
+    switch (inputValidation(buff, validInputs)) {
+    case 0:
+        int ind;
+        std::cout << "Enter the index of the hash you want to read.\n";
+        std::cin >> ind;
+        if (ind < 0 || ind >= hashesCount) {
+            std::cout << "Invalid input\n";
+            return;
+        }
+        hash = hashMessages[ind];
+        break;
+    case 1:
+        std::cout << "Enter a hash:\n";
+        std::cin.getline(buff, 100);
+        hash = buff;
+        break;
+    default: std::cout << "Invalid input\n"; return;
+    }
+    
+    //Now, compare the hash to the hashes of all existing messages 
+    for (int i = 0; i < messagesCount; i++) {
+        char* temp = createHash(messages[i]);
+        if (stringsAreEqual(hash, temp)) {
+            std::cout << "Original message: " << messages[i] << "\n";
+            return;
+        }
+    }
+    std::cout << "No matches found\n";
 }
 
