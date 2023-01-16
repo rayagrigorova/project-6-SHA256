@@ -3,7 +3,7 @@
 This project is a console application that implements text hashing <br>
 using SHA-256, part of the Secure Hash Algorithm 2(SHA-2).
 
-### Uses of SHA-256
+## Uses of SHA-256
 
 SHA-256 is used in many circumstances, for example:
 
@@ -13,7 +13,7 @@ SHA-256 is used in many circumstances, for example:
 - In anti-viruses, to compare the fingerprints of files and programs <br>
 - In version control systems like Git to check if data has changed <br>
 
-### Functionalities
+## Functionalities
 
 The application has the following functionalities:
 
