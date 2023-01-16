@@ -6,9 +6,8 @@ const int START_SIZE = 100;
 
 const int DIGEST_SIZE = 512;
 
-const int BITS_IN_A_BYTE = 8;
 const int UNSIGNED_INT_BITS = 32;
-const int UNSIGNED_CHAR_BITS = 8;
+const int UNSIGNED_INTS_IN_CHUNK = 16;
 
 const int BIG_ENDIAN_INT_BITS = 64;
 const int BIG_ENDIAN_INT_BYTES = 8;
@@ -25,14 +24,14 @@ int hashesCount = 0;
 char** messages = new char* [START_SIZE];
 char** hashMessages = new char* [START_SIZE];
 
-unsigned int h0 = 0x6a09e667;
-unsigned int h1 = 0xbb67ae85;
-unsigned int h2 = 0x3c6ef372;
-unsigned int h3 = 0xa54ff53a;
-unsigned int h4 = 0x510e527f;
-unsigned int h5 = 0x9b05688c;
-unsigned int h6 = 0x1f83d9ab;
-unsigned int h7 = 0x5be0cd19;
+unsigned int h0;
+unsigned int h1;
+unsigned int h2;
+unsigned int h3;
+unsigned int h4;
+unsigned int h5;
+unsigned int h6;
+unsigned int h7;
 
 unsigned int k[64] = {
 0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -47,6 +46,7 @@ unsigned int k[64] = {
 
 int inputValidation(const char buff[], const char validInputs[]);
 bool stringsAreEqual(const char* str1, const char* str2);
+bool inputIsOperation(const char* input, const char operation);
 
 void readMessageFromFile();
 char* createMessageFromFile(const char* fileName);
@@ -54,27 +54,24 @@ int countCharactersInFile(const char* fileName);
 void freeSpace(char** arr, const int size);
 void addStringToArray(char* str, int& stringsCount, int& arraySize, char** arr);
 void increaseArraySize(char** arr, int& arraySize);
-int stringLength(char* str);
+unsigned long long stringLength(const char* str);
 
-bool arrayContainsString(char* str, char** array);
+bool arrayContainsString(char* str, char** array, const int numberOfElements);
 
 void hashMessage();
 char* createHash(char* message);
+void initGlobalVariables();
 void saveHashToFile(char* hash, char* fileName);
 bool fileExists(char* fileName);
-char* preProcessing(char* message);
-void chunkLoop(char* paddedMessage, const int numberOf8BitWordsInDigest);
+unsigned int* preProcessing(char* message, int& paddedMessageSize);
+void chunkLoop(unsigned int* paddedMessage);
 unsigned int rightRotate(const unsigned int n, const unsigned int d);
-unsigned int leftRotate(const unsigned int n, const unsigned int d);
-unsigned int reverseBits(unsigned int num);
 void initHash(unsigned int* finalHash);
 void toHex(unsigned int* finalHash, char result[]);
-int stringLengthUnsigned(char* str);
 
 void readHashedMessage();
 
 void printBinaryNumber(unsigned int a);
-
 
 int main()
 {
@@ -83,7 +80,7 @@ int main()
     bool getUserInput = true;
 
     while (getUserInput) {
-        std::cout << "To exit the program, enter 0\n";
+        std::cout << "\nTo exit the program, enter 0\n";
         std::cout << "To read a message from file, enter 1\n";
         std::cout << "To hash a message, enter 2\n";
         std::cout << "To read a hashed message, enter 3\n";
@@ -99,15 +96,15 @@ int main()
     }
 
     freeSpace(messages, messagesCount);
-    freeSpace(hashMessages, messagesCount);
+    freeSpace(hashMessages, hashesCount);
 }
 
 //This function will return the number of the operation to be performed or -1
 int inputValidation(const char buff[], const char validInputs[]) {
     //Compare each of the valid inputs to buff
     for (int i = 0; validInputs[i] != '\0'; i++) {
-        if (stringsAreEqual(buff, &validInputs[i])) {
-            return validInputs[i];
+        if (inputIsOperation(buff, validInputs[i])) {
+            return validInputs[i] - '0';
         }
     }
     return -1;
@@ -122,10 +119,20 @@ bool stringsAreEqual(const char* str1, const char* str2)
         if (*str1 != *str2) {
             return 0;
         }
+        str1++;
+        str2++;
     }
     //If one of the strings is longer than the other, they can't be equal
     //This will only return true if *str1 == *str2 == '\0'
     return (*str1 == *str2);
+}
+
+bool inputIsOperation(const char* input, const char operation)
+{
+    if (stringLength(input) > 1) {
+        return false;
+    }
+    return(input[0] == operation);
 }
 
 void readMessageFromFile() {
@@ -139,12 +146,16 @@ void readMessageFromFile() {
         std::cout << "Error reading from file\n";
         return;
     }
+
     std::cout << "Data from " << fileName << ":\n";
-    while (file >> buff) {
-        std::cout << buff;
+    char ch;
+    while (file >> std::noskipws >> ch) {
+        std::cout << ch;
     }
+    std::cout << "\n";
+
     char validInput[] = { '0', '1' };
-    std::cout << "Do you want to save this message? Enter 1 if yes and 0 if no";
+    std::cout << "Do you want to save this message? Enter 1 if yes and 0 if no\n";
     std::cin.getline(buff, 100);
     switch (inputValidation(buff, validInput)) {
     case 0: return;
@@ -173,12 +184,6 @@ char* createMessageFromFile(const char* fileName) {
     }
     message[arrayLength] = '\0';
 
-    if (arrayContainsString(message, messages)) {
-        std::cout << "The message already exists\n";
-        return nullptr;
-    }
-
-    std::cout << "Message was created.\n";
     file.close();
 
     addStringToArray(message, messagesCount, messagesSize, messages);
@@ -211,9 +216,14 @@ void freeSpace(char** arr, const int size) {
 }
 
 void addStringToArray(char* str, int& stringsCount, int& arraySize, char** arr) {
+    if (arrayContainsString(str, arr, stringsCount)) {
+        std::cout << "The data is already saved\n";
+        return;
+    }
+
     //Before adding a new message, we should first make sure that there is enough space in the messages array.
     //If not, then we must increase the size of the array by START_SIZE_MESSAGES
-    if (messagesCount >= arraySize) {
+    if (stringsCount >= arraySize) {
         increaseArraySize(arr, arraySize);
     }
     //Now, we can freely add the new message to the array
@@ -242,8 +252,8 @@ void increaseArraySize(char** arr, int& arraySize) {
     arraySize += START_SIZE;
 }
 
-int stringLength(char* str) {
-    int i = 0;
+unsigned long long stringLength(const char* str){
+    unsigned long long i = 0;
     while (*str) {
         str++;
         i++;
@@ -251,10 +261,8 @@ int stringLength(char* str) {
     return i;
 }
 
-
-bool arrayContainsString(char* str, char** array)
-{
-    for (int i = 0; i < messagesCount; i++) {
+bool arrayContainsString(char* str, char** array, const int numberOfElements){
+    for (int i = 0; i < numberOfElements; i++) {
         if (stringsAreEqual(str, array[i])) {
             return true;
         }
@@ -277,6 +285,7 @@ void hashMessage()
         int ind;
         std::cout << "Enter the index of the message you want to hash.\n";
         std::cin >> ind;
+        std::cin.ignore();
         if (ind < 0 || ind >= messagesCount) {
             std::cout << "Invalid input\n";
             return;
@@ -295,7 +304,9 @@ void hashMessage()
     std::cout << "Do you want to save this hash ? Enter 1 if yes and 0 if no\n";
     std::cin.getline(buff, 100);
     switch (inputValidation(buff, validInputs)) {
-    case 0: return;
+    case 0:
+        delete[] hash;
+        return;
     case 1: addStringToArray(hash, hashesCount, hashesSize, hashMessages); break;
     default: std::cout << "Invalid input\n";
     }
@@ -314,14 +325,18 @@ void hashMessage()
 }
 
 char* createHash(char* message) {
+    initGlobalVariables();
     char* result = new char[HASH_CHARACTERS + 1];
-     char* paddedMessage = preProcessing(message);
+    int paddedMessageSize = 0;
+    unsigned int* paddedMessage = preProcessing(message, paddedMessageSize);
 
     //Now, process the message in 512-bit chunks 
-    //So, in each step, process 64 characters from the paddedMessage array
-    int numberOf8BitWordsInDigest = DIGEST_SIZE / BITS_IN_A_BYTE; //64
-    for (int i = 0; paddedMessage[i] != 0b11111111; i += numberOf8BitWordsInDigest) {
-        chunkLoop(paddedMessage + i * numberOf8BitWordsInDigest, numberOf8BitWordsInDigest);
+    //512(bits in each digest) / 32(unsigned int bits) = 16(ints in each digest)
+    int chunksCount = paddedMessageSize / UNSIGNED_INTS_IN_CHUNK;
+
+    for (int i = 0; i < chunksCount; i ++) {
+        //Perform the chunk loop for the next 16 integers 
+        chunkLoop(paddedMessage + i * UNSIGNED_INTS_IN_CHUNK);
     }
     //Now, create the final hash by appending h0,...,h7
     unsigned int* finalHash = new unsigned int[HASH_BITS / UNSIGNED_INT_BITS];
@@ -333,6 +348,18 @@ char* createHash(char* message) {
     delete[] paddedMessage;
 
     return result;
+}
+
+void initGlobalVariables()
+{
+    h0 = 0x6a09e667;
+    h1 = 0xbb67ae85;
+    h2 = 0x3c6ef372;
+    h3 = 0xa54ff53a;
+    h4 = 0x510e527f;
+    h5 = 0x9b05688c;
+    h6 = 0x1f83d9ab;
+    h7 = 0x5be0cd19;
 }
 
 void saveHashToFile(char* hash, char* fileName)
@@ -392,76 +419,105 @@ bool fileExists(char* fileName)
     return f.good();
 }
 
-char* preProcessing(char* message) {
-    //begin with the original message of length L bits
-    //append a single '1' bit
-    //append K '0' bits, where K is the minimum number >= 0 such that L + 1 + K + 64 is a multiple of 512
-    //append L as a 64 - bit big - endian integer, making the total post - processed length a multiple of 512 bits
-    const int SINGLE_BIT_SIZE = 1;
+unsigned int* preProcessing(char* message, int& paddedMessageSize) {
+    unsigned long long messageLength = stringLength(message);
+    int messageLengthInBits = messageLength * 8;
 
-    int length = stringLengthUnsigned(message);
-    int L = BITS_IN_A_BYTE * length;
-    int rem = (L + BITS_IN_A_BYTE + BIG_ENDIAN_INT_BITS) % DIGEST_SIZE;
-    //This is the number of 0 bits, but it makes more sense to think of them as bytes.
-    int K = DIGEST_SIZE - rem;
+    //The input must be evenly divisible by 512
+    //At this point, we still don't know how many zeroes we need - however, we do know the length of 
+    //the message in bits and the size of the big endian integer. We have to append a '1', which is 128
+    int rem = (messageLengthInBits + BIG_ENDIAN_INT_BITS + 8) % DIGEST_SIZE;
+    int zeroesToAddBits = DIGEST_SIZE - rem;
 
-    //The size of the padded message will be equal to the original length of the message + 1 byte for the appended
-    //'1' and the zeroes after it + K / BITS_IN_A_BYTE + 8 bytes for the big-endian int + 1 for the null-terminator 
-    int paddedMessageLength = length + 1 + K / BITS_IN_A_BYTE + BIG_ENDIAN_INT_BYTES + 1;
-    char* paddedMessage = new char[paddedMessageLength];
-    
-    //Copy the message to the paddedMessage array 
-    for (int i = 0; i < length; i++) {
-        paddedMessage[i] = message[i];
+    //The final size of the array will be the message length in bits + the zeroes to add (and the '1') + the big endian int
+    int arraySizeBits = messageLengthInBits + 8 + zeroesToAddBits + BIG_ENDIAN_INT_BITS;
+    int arraySize = arraySizeBits / UNSIGNED_INT_BITS;
+    //I want to save the size of the array in a variable to use later 
+    paddedMessageSize = arraySize;
+
+    unsigned int* arr = new unsigned int[arraySize];
+
+    //Now, fill the array
+    int arrayInd = 0;
+    int messageInd = 0;
+    //The number of unsigned integers that will be used to store the message
+    int messageIntegersCount = messageLengthInBits / UNSIGNED_INT_BITS;
+    //If the message length isn't evenly divisible by 32, add zeroes as needed 
+    if (messageLengthInBits % UNSIGNED_INT_BITS != 0) {
+        messageIntegersCount++;
+        //Decrease the zeroes by the number needed to pad the message to an unsigned integer 
+        // -8, because I am looking at the 8-bit word '10000000' seperately
+        //Hence, if 8 bits are needed to complete the integer, the zeroesToAddBits will not be decreased because 10000000
+        //will be enough to complete the integer 
+        zeroesToAddBits -= (UNSIGNED_INT_BITS - messageLengthInBits % UNSIGNED_INT_BITS - 8);
     }
 
-    //The next byte should be equal to 10000000
-    paddedMessage[length] = 0b10000000;
+    unsigned int integerToAdd = 0;
+    int i;
+    for (i = 1; i < messageLength + 1; i++) {
+        //Make place for the next character 
+        integerToAdd = (integerToAdd << 8);
+        //Extract the character into the unsigned integer
+        integerToAdd = (integerToAdd | message[messageInd++]);
+        //Each 4 steps, add the unsigned integer to the array and initialize it back to 0
+        if (i % 4 == 0) {
+            arr[arrayInd++] = integerToAdd;
+            integerToAdd = 0;
+        }
+    }
+    //Add some zeroes plus the '1' if necessary
+    //Decrease i since its final value will be  messageLength + 1
+    i--;
+    i = i % 4;
+    //If i == 0, simply add the '1' + 31 zeroes after it to the array  
+    if (!i) {
+        arr[arrayInd++] = 0b100000000000000000000000000000000;
+    }
+    else {
+        unsigned char mask = 0b10000000;
+        //The number of steps left to perform 
+        i = 4 - i;
+        while (i) {
+            integerToAdd = integerToAdd << 8;
+            integerToAdd = integerToAdd | mask;
+            mask = mask << 8;
+            i--;
 
-    //Pad with the necessary zeroes 
-    int endInd = paddedMessageLength - BIG_ENDIAN_INT_BYTES - 1;
-    for (int i = length + 1; i < endInd; i++) {
-        paddedMessage[i] = 0b00000000;
+            //When i reaches 0, add the new integer
+            if (!i) {
+                arr[arrayInd++] = integerToAdd;
+            }
+        }
     }
 
-    char mask = 0b11111111;
-    for (int i = paddedMessageLength - 2; i >= endInd; i--) {
-        //Read the last 8 bits of originalInputLengthInBinary
-        char ch = L & mask;
-        paddedMessage[i] = ch;
-        //Rightshift originalInputLengthInBinary by 8 bits 
-        L = L >> BITS_IN_A_BYTE;
+    int zeroesCount = zeroesToAddBits / UNSIGNED_INT_BITS;
+    for (int i = 0; i < zeroesCount; i++) {
+        arr[arrayInd++] = 0;
     }
-    //Since the padding has been done using a char with value zero, I will use the biggest possible char 
-    //instead of a null terminator 
-    paddedMessage[paddedMessageLength - 1] = 0b11111111;
 
-    return paddedMessage;
+    //Now, add the 64-bit big endian integer representing the length of the string
+    for (int j = 0; j < 2; j++) {
+        integerToAdd = 0;
+        //Copy the last 32 bits of the message length 
+        integerToAdd = integerToAdd | messageLength;
+        //Shift right so that the next 32 bits can be read
+        messageLength = (messageLength >> UNSIGNED_INT_BITS);
+        //Since the integer is big-endian, the big end will be stored first, before the little end 
+        arr[arraySize - 1 - j] = integerToAdd;
+    }
+    return arr;
 }
 
-void chunkLoop(char* paddedMessage, const int numberOf8BitWordsInDigest) {
-    int _8BitWordsIn32BitWord = UNSIGNED_INT_BITS / UNSIGNED_CHAR_BITS;
-    const int MESSAGE_SCHEDULE_SIZE = 64;
-    const int INPUT_DATA_SIZE = 16; 
+void chunkLoop(unsigned int* paddedMessage) {
+    const int MESSAGE_SCHEDULE_SIZE = 64; //the number of unsigned ints used for w0,..w63
+    const int INPUT_DATA_SIZE = 16; //the number of unsigned ints used for w0,..w15
 
     unsigned int* w = new unsigned int [MESSAGE_SCHEDULE_SIZE]();
-    int wInd = 0;
 
     //Copy all data from padded message to the new array
-    for (int i = 0; i < 64; i += _8BitWordsIn32BitWord) {
-        //For this step, we need to merge 4 8-bit characters in a 32-bit unsigned int 
-        //To do this, I am going to do the following: 
-
-
-        //Now, extract the bits of each character into w[wInd]
-        for (int j = 0; j < _8BitWordsIn32BitWord; j++) {
-            unsigned int _8BitWordUnsignedInt = paddedMessage[i + j];
-            _8BitWordUnsignedInt <<= ((_8BitWordsIn32BitWord - j - 1) * UNSIGNED_CHAR_BITS);
-            w[wInd] = w[wInd] | _8BitWordUnsignedInt;
-
-        }
-
-        wInd++;
+    for (int i = 0; i < INPUT_DATA_SIZE; i++) {
+        w[i] = paddedMessage[i];
+        std::cout << w[i] << " ";
     }
 
     //Modify the zeroes indices at the end of the array 
@@ -518,10 +574,6 @@ unsigned int rightRotate(const unsigned int n, const unsigned int d){
     return (n >> d) | (n << (UNSIGNED_INT_BITS - d));
 }
 
-unsigned int leftRotate(const unsigned int n, const unsigned int d) {
-    return (n << d) | (n >> (UNSIGNED_INT_BITS - d));
-}
-
 void printBinaryNumber(unsigned int a) {
     int binaryNum[32];
 
@@ -532,24 +584,6 @@ void printBinaryNumber(unsigned int a) {
 
     for (int j = 31; j >= 0; j--)
         std::cout << binaryNum[j];
-}
-
-unsigned int reverseBits(unsigned int num)
-{
-    unsigned int reversed = 0;
-    while (num > 0){
-        //Making place for the next digit
-        reversed <<= 1;
-
-        // If the last bit of num is 1, save it in the back of the reversed number 
-        if ((num & 1) == 1) {
-            reversed ^= 1;
-        }
-
-        //This way, we are deleting the last bit of num 
-        num >>= 1;
-    }
-    return reversed;
 }
 
 void initHash(unsigned int* finalHash) {
@@ -604,6 +638,7 @@ void readHashedMessage()
         int ind;
         std::cout << "Enter the index of the hash you want to read.\n";
         std::cin >> ind;
+        std::cin.ignore();
         if (ind < 0 || ind >= hashesCount) {
             std::cout << "Invalid input\n";
             return;
