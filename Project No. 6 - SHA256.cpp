@@ -421,7 +421,7 @@ bool fileExists(char* fileName)
 
 unsigned int* preProcessing(char* message, int& paddedMessageSize) {
     unsigned long long messageLength = stringLength(message);
-    int messageLengthInBits = messageLength * 8;
+    unsigned long long messageLengthInBits = messageLength * 8;
 
     //The input must be evenly divisible by 512
     //At this point, we still don't know how many zeroes we need - however, we do know the length of 
@@ -499,9 +499,9 @@ unsigned int* preProcessing(char* message, int& paddedMessageSize) {
     for (int j = 0; j < 2; j++) {
         integerToAdd = 0;
         //Copy the last 32 bits of the message length 
-        integerToAdd = integerToAdd | messageLength;
+        integerToAdd = integerToAdd | messageLengthInBits;
         //Shift right so that the next 32 bits can be read
-        messageLength = (messageLength >> UNSIGNED_INT_BITS);
+        messageLengthInBits = (messageLengthInBits >> UNSIGNED_INT_BITS);
         //Since the integer is big-endian, the big end will be stored first, before the little end 
         arr[arraySize - 1 - j] = integerToAdd;
     }
@@ -517,7 +517,6 @@ void chunkLoop(unsigned int* paddedMessage) {
     //Copy all data from padded message to the new array
     for (int i = 0; i < INPUT_DATA_SIZE; i++) {
         w[i] = paddedMessage[i];
-        std::cout << w[i] << " ";
     }
 
     //Modify the zeroes indices at the end of the array 
@@ -525,9 +524,8 @@ void chunkLoop(unsigned int* paddedMessage) {
         unsigned int s0 = rightRotate(w[i - 15], 7) ^ rightRotate(w[i - 15], 18) ^ (w[i - 15] >> 3);
         unsigned int s1 = rightRotate(w[i - 2], 17) ^ rightRotate(w[i - 2], 19) ^ (w[i - 2] >> 10);
         w[i] = w[i - 16] + s0 + w[i - 7] + s1;
-
     }
-    
+  
     //Initialize working variables to current hash value:
     unsigned int a = h0;
     unsigned int b = h1;
