@@ -21,3 +21,4 @@ The application has the following functionalities:
 - Hashing a message using SHA-256 <br>
 - Saving a hashed message to a file <br>
 - Reading a hashed message <br>
+- Adding a new message from user input <br>
