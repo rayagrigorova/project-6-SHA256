@@ -22,3 +22,8 @@ The application has the following functionalities:
 - Saving a hashed message to a file <br>
 - Reading a hashed message <br>
 - Adding a new message from user input <br>
+
+## Assignment
+
+[Проект06 - Хеширане.pdf](https://github.com/rayagrigorova/project-6-SHA256/files/12185374/06.-.pdf)
+
